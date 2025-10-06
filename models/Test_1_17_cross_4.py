@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-================================================
-Overall - mae:0.16605626046657562, rmse:0.26890525221824646, rr:0.8446352109381022, dtw:2.9436128095537524
-X Direction - mae:0.1476307362318039, rmse:0.21890829503536224, rr:0.9321503112003232, dtw:1.6856716448369695
-Z Direction - mae:0.18448184430599213, rmse:0.310964971780777, rr:0.757120110675881, dtw:2.162875453783972
-"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,50 +15,38 @@ from scipy.signal import welch, csd
 
 
 class PhaseBiasedCrossAttention(nn.Module):
-    """
-    物理偏置-相位编码交叉注意力 (Physics-Bias Phase Attention)
-    - 在logits上增加一个可学习的相位偏置: bias = cos(2π * ω * Δt)
-    - ω是可学习的频率, Δt是时间差
-    - 允许模型捕捉周期性或共振相关的耦合关系
-    """
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
         super().__init__()
         self.d_k = d_model // n_heads
         self.n_h = n_heads
 
-        # 投影层
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
         self.o_proj = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
 
-        # 可学习的角频率 ω (每个头独立), 初始化为较小的值
         self.log_omega = nn.Parameter(torch.randn(n_heads, 1, 1) - 2)
 
     def forward(self, Q_in: torch.Tensor, K_in: torch.Tensor, V_in: torch.Tensor, attn_mask=None):
         B, L_q, _ = Q_in.shape
         _, L_k, _ = K_in.shape
 
-        # --- 1. 标准注意力logits计算 ---
         Q = self.q_proj(Q_in).view(B, L_q, self.n_h, self.d_k).transpose(1, 2)
         K = self.k_proj(K_in).view(B, L_k, self.n_h, self.d_k).transpose(1, 2)
         V = self.v_proj(V_in).view(B, L_k, self.n_h, self.d_k).transpose(1, 2)
         logits = (Q @ K.transpose(-2, -1)) / math.sqrt(self.d_k)
 
-        # --- 2. 计算相位偏置 ---
         idx_q = torch.arange(L_q, device=Q_in.device, dtype=torch.float)
         idx_k = torch.arange(L_k, device=Q_in.device, dtype=torch.float)
         delta_t = idx_q[:, None] - idx_k[None, :]  # (L_q, L_k)
 
-        omega = torch.exp(self.log_omega)  # (H, 1, 1), 保证 ω > 0
+        omega = torch.exp(self.log_omega)  # (H, 1, 1)
         phase_diff = 2 * math.pi * omega * delta_t.unsqueeze(0)  # (H, L_q, L_k)
         phase_bias = torch.cos(phase_diff)
 
-        # --- 3. 添加偏置到logits ---
         logits = logits + phase_bias.unsqueeze(0)
 
-        # --- 4. 应用掩码和Softmax ---
         if attn_mask is not None:
             if attn_mask.dim() == 3:
                 attn_mask = attn_mask.unsqueeze(1)
@@ -72,47 +55,34 @@ class PhaseBiasedCrossAttention(nn.Module):
         attn = torch.softmax(logits, dim=-1)
         attn = self.dropout(attn)
 
-        # --- 5. 输出 ---
         out = (attn @ V).transpose(1, 2).contiguous().view(B, L_q, -1)
         return self.o_proj(out), attn
 
 class SoftMaskedCrossAttention(nn.Module):
-    """
-    物理信息引导的交叉注意力
-    Soft-Masked Cross-Attention:
-    - Q来自一组序列，K/V来自另一组序列；
-    - 在 logits 上加 log(α M + (1-α))，保留梯度流。
-    """
+
     def __init__(self, d_model: int, n_heads: int, mask_fn, dropout: float = 0.1):
         super().__init__()
         self.d_k   = d_model // n_heads
         self.n_h   = n_heads
-        # 投影
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
         self.o_proj = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
-        # ===== 改①：每个 Head 独立 α =====
-        # 初始 α=0.5 ⇒ logit(0.5)=0
         self.logit_alpha = nn.Parameter(torch.zeros(n_heads))
-        # mask_fn: 返回 (H,L_q,L_k)
         self.mask_fn = mask_fn
 
     def forward(self, Q_in: torch.Tensor, K_in: torch.Tensor, V_in: torch.Tensor, attn_mask=None):
-        # Q_in: (B,L_q,d), K_in/V_in: (B,L_k,d)
+
         B, L_q, _ = Q_in.shape
         _, L_k, _ = K_in.shape
 
-        # 线性投影并 reshape
         Q = self.q_proj(Q_in).view(B, L_q, self.n_h, self.d_k).transpose(1,2)  # (B,H,L_q,d_k)
         K = self.k_proj(K_in).view(B, L_k, self.n_h, self.d_k).transpose(1,2)  # (B,H,L_k,d_k)
         V = self.v_proj(V_in).view(B, L_k, self.n_h, self.d_k).transpose(1,2)  # (B,H,L_k,d_k)
 
-        # 标准点积注意力 logits
         logits = (Q @ K.transpose(-2,-1)) / sqrt(self.d_k)  # (B,H,L_q,L_k)
 
-        # 生成物理软掩码
         M = self.mask_fn(
             n_heads_call=self.n_h,
             L_q=L_q,
@@ -123,14 +93,9 @@ class SoftMaskedCrossAttention(nn.Module):
         )                               # (H,L_q,L_k)
         M = M.unsqueeze(0)              # (1,H,L_q,L_k)
 
-        # ===== Value-gating：softmax 后再乘 (α·M + 1-α) =====
         alpha = torch.sigmoid(self.logit_alpha).view(1, self.n_h, 1, 1)   # (1,H,1,1)
 
-        # 应用 attn_mask (例如 padding mask)
         if attn_mask is not None:
-            # attn_mask 预期是布尔张量，True表示不遮盖，False表示遮盖
-            # 它的形状需要能广播到 (B, H, L_q, L_k)
-            # 通常从AttentionLayer传来的是 (B, L_q, L_k)
             if attn_mask.dim() == 3: # (B, L_q, L_k)
                 attn_mask_expanded = attn_mask.unsqueeze(1) # -> (B, 1, L_q, L_k)
             elif attn_mask.dim() == 4 and attn_mask.shape[1] == 1: # (B, 1, L_q, L_k)
@@ -139,22 +104,17 @@ class SoftMaskedCrossAttention(nn.Module):
                 attn_mask_expanded = attn_mask
             else:
                  raise ValueError(f"Unsupported attn_mask shape: {attn_mask.shape} for logits shape {logits.shape}")
-            
-            # masked_fill 的 condition 为 True 的地方会被填充
-            # 如果 attn_mask 中 False 代表需要mask，则用 ~attn_mask (如果它是bool) 或 attn_mask == False
             if attn_mask_expanded.dtype == torch.bool:
                 logits = logits.masked_fill(~attn_mask_expanded, -1e30)
-            else: # Assuming 0 means mask, 1 means keep for float masks
+            else:
                 logits = logits.masked_fill(attn_mask_expanded == 0, -1e30)
 
 
-        # 归一化注意力权重
         attn = F.softmax(logits, dim=-1)
         gate = alpha * M + (1 - alpha)            # (1,H,L_q,L_k)
         attn = attn * gate                        # Value-gating
         attn = self.dropout(attn)
 
-        # 输出组合
         out = (attn @ V).transpose(1,2).contiguous().view(B, L_q, -1)
         if self.training and (torch.rand(()) < 0.001):
             print(f"[MASK-DBG] α_mean={alpha.mean().item():.3f} (min/max: {alpha.min().item():.3f}/{alpha.max().item():.3f}), "
@@ -199,18 +159,6 @@ class AttentionLayer(nn.Module):
         return self.out_projection(out), attn
     
 class DampedBiAttention(nn.Module):
-    """Self‑attention with exponential damping in *both* temporal directions.
-
-    Parameters
-    ----------
-    d_model : int
-        Embedding dimension.
-    nhead : int
-        Number of attention heads.
-    lambda_init : float, optional
-        Initial value for the forward/backward decay rate λ (>0).
-    dropout : float, optional
-    """
 
     def __init__(self, d_model: int, nhead: int, *, lambda_init: float = 0.1,
                  dropout: float = 0.1) -> None:
@@ -219,24 +167,14 @@ class DampedBiAttention(nn.Module):
         self.nhead = nhead
         self.qkv_proj = nn.Linear(d_model, 3 * d_model)
         self.out_proj = nn.Linear(d_model, d_model)
-        # separate learnable decay rates for past (fwd) and future (bwd)
         self.lambda_fwd = nn.Parameter(torch.full((nhead, 1, 1), lambda_init))
         self.lambda_bwd = nn.Parameter(torch.full((nhead, 1, 1), lambda_init))
         self.dropout = nn.Dropout(dropout)
-        self.dt = 1.0  # 由配置或自动计算得到的采样间隔(秒)
+        self.dt = 1.0
 
     # ---------------------------------------------------------------------
     def forward(self, x, attn_mask):
-        """Parameters
-        ----------
-        x : Tensor, shape (B, T, d_model)
-        attn_mask : optional BoolTensor (B, T, T) – positions with *False*
-            will be masked.  Pass *None* for full attention.
-        Returns
-        -------
-        out : Tensor, (B, T, d_model)
-        attn : Tensor, (B, nhead, T, T) – softmax weights
-        """
+
         B, T, _ = x.shape
         H = self.nhead
         d_head = self.d_model // H
@@ -248,18 +186,16 @@ class DampedBiAttention(nn.Module):
         k = k.view(B, T, H, d_head).transpose(1, 2)
         v = v.view(B, T, H, d_head).transpose(1, 2)
 
-        # scaled dot‑product
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_head)
-        # build exponential decay bias (shape T×T) – cached on device
         idx = torch.arange(T, device=x.device)
-        rel = idx[None, :] - idx[:, None]           # 整数差 n
-        lam_fwd = F.softplus(self.lambda_fwd)       # 保证 λ>0
+        rel = idx[None, :] - idx[:, None]           
+        lam_fwd = F.softplus(self.lambda_fwd)       
         lam_bwd = F.softplus(self.lambda_bwd)
         decay = torch.where(
-            rel < 0, -lam_bwd * self.dt * rel.abs().float(),   # 看"未来"(负 n)
+            rel < 0, -lam_bwd * self.dt * rel.abs().float(),   
             torch.where(
-                rel > 0, -lam_fwd * self.dt * rel.float(),     # 看"过去"(正 n)
-                torch.zeros_like(rel, dtype=torch.float)       # n=0
+                rel > 0, -lam_fwd * self.dt * rel.float(),     
+                torch.zeros_like(rel, dtype=torch.float)       
             )
         )
         scores = scores + decay.unsqueeze(0)
@@ -296,9 +232,7 @@ class Decoder(nn.Module):
             x = self.projection(x)
         
         seasonal_part = x
-        # 确保trend和residual_trend具有相同的序列长度
         if trend.shape[1] != residual_trend.shape[1]:
-            # 如果trend序列更长，截取到相同长度
             trend = trend[:, -residual_trend.shape[1]:, :]
         trend_part = trend + residual_trend
         return seasonal_part, trend_part
@@ -328,11 +262,8 @@ class DecoderLayer(nn.Module):
         self.fusion_projection = nn.Linear(d_model * 2, d_model)
         self.trend_projection = nn.Linear(d_model, d_inner)
 
-        # ---------------- 上下文融合新增组件 ----------------
-        # 可学习的全局 Query（1 个 token，维度 d_model）
         self.global_q = nn.Parameter(torch.randn(1, 1, d_model))
 
-        # 用于 Query‑Adaptive Pooling 的 Multi‑Head Attention
         self.ctx_pool_attn = nn.MultiheadAttention(
             embed_dim=d_model,
             num_heads=8,
@@ -344,37 +275,25 @@ class DecoderLayer(nn.Module):
         
         B, L, _ = x_sa_input.shape
 
-        # -------- 1. Self‑Attention 路径 --------
         sa_attn_out, attn = self.self_attention(x_sa_input, attn_mask=x_mask)
-        self.attn = attn  # 保存自注意力权重
-        
-        # -------- 2. 双向 Cross‑Attention (两步) --------
+        self.attn = attn
         ca2_attn_out, ca2_attn = self.cross_attention_fwd(x_ca_q2_input, x_ca_q1_input, x_ca_q1_input, attn_mask=cross_mask)
-        
         enriched_x_ca_q2 = x_ca_q2_input + self.dropout(ca2_attn_out)
         ca1_attn_out, ca1_attn = self.cross_attention_rev(x_ca_q1_input, enriched_x_ca_q2, enriched_x_ca_q2, attn_mask=cross_mask)
+        self.cross_attn_fwd = ca2_attn
+        self.cross_attn_rev = ca1_attn
         
-        # ========== 新增：保存交叉注意力权重 ==========
-        self.cross_attn_fwd = ca2_attn    # 前向交叉注意力权重
-        self.cross_attn_rev = ca1_attn    # 反向交叉注意力权重
-        
-        # ---------------- 3. 上下文融合升级 ----------------
-        # 3‑1 Query‑Adaptive Pooling：用可学习全局 token 获取 ca1 的 summary
         global_q = self.global_q.repeat(B, 1, 1)                         # [B, 1, D]
         summary, _ = self.ctx_pool_attn(global_q, ca1_attn_out, ca1_attn_out)
         summary = summary.expand(-1, L, -1)                              # broadcast → [B, L, D]
-        
-        # 3‑2 融合
         fused_features = torch.cat((sa_attn_out, summary), dim=-1) 
         combined_attn_out = self.fusion_projection(fused_features) 
         
-        # 残差连接 & Norm
         x = x_sa_input + self.dropout(combined_attn_out) 
         x = self.norm_attn_fuse_output(x)
         
         x, trend1 = self.decomp1(x)
 
-        # Feed-Forward Network
         residual_ffn = x 
         x_norm3 = self.norm3(x)
         x_ffn_processed = x_norm3.transpose(-1, 1)
@@ -392,15 +311,10 @@ class DecoderLayer(nn.Module):
         return x, projected_residual_trend
 
 class Model(nn.Module):
-    """
-    """
+
 
     def __init__(self, configs, version='fourier', mode_select='low', modes=32):
-        """
-        version: str, for FEDformer, there are two versions to choose, options: [fourier, Wavelets].
-        mode_select: str, for FEDformer, there are two mode selection method, options: [random, low].
-        modes: int, modes to be selected.
-        """
+
         super(Model, self).__init__()
         self.task_name = configs.task_name
         self.seq_len = configs.seq_len
@@ -416,11 +330,6 @@ class Model(nn.Module):
         
         # Encoder embedding
         self.en_embedding = DataEmbedding(configs.enc_in, configs.d_model, configs.embed, configs.freq, configs.dropout)
-
-        # Decoder embeddings (new)
-        # self.ca_ex_embedding = DataEmbedding_inverted(configs.seq_len, configs.d_model, configs.embed, configs.freq, configs.dropout)
-        # self.ca_en_embedding = DataEmbedding_inverted(configs.seq_len, configs.d_model, configs.embed, configs.freq, configs.dropout)
-
         self.ca_ex_embedding = DataEmbedding(12, configs.d_model, configs.embed, configs.freq, configs.dropout)
         self.ca_en_embedding = DataEmbedding(4, configs.d_model, configs.embed, configs.freq, configs.dropout)
 

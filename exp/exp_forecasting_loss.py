@@ -22,20 +22,20 @@ warnings.filterwarnings("ignore")
 class Exp_Forecasting_Frequency_Loss(Exp_Basic):
     def __init__(self, args):
         super(Exp_Forecasting_Frequency_Loss, self).__init__(args)
-        # 初始化logger
+                   
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         
-        # 控制台输出
+               
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
         self.logger.addHandler(console_handler)
         
-        # 文件输出将在train函数中设置
+                          
         self.file_handler = None
 
-        # 添加 mask 初始化逻辑
+                       
         self.pred_len = args.pred_len
 
         if args.add_noise and args.noise_amp > 0:
@@ -83,14 +83,14 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
+                               
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
                 dec_inp = (
                     torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
                     .float()
                     .to(self.device)
                 )
-                # encoder - decoder
+                                   
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
                         outputs = self.model(
@@ -100,10 +100,10 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 if self.args.features == "MS":
                     f_dim = -1
-                # 单变量预测单变量
+                          
                 elif self.args.features == "S":
                     f_dim = 0
-                # 多变量预测单变量
+                          
                 elif self.args.features == "M" and self.args.target_num == 1:
                     f_dim = self.args.f_dim
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
@@ -123,7 +123,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         train_data, train_loader = self._get_data(flag="train")
         vali_data, vali_loader = self._get_data(flag="val")
         test_data, test_loader = self._get_data(flag="test")
-        # 保存训练数据的 scaler 参数
+                           
         scale_params = {
             'mean_': train_data.scaler.mean_,
             'scale_': train_data.scaler.scale_
@@ -132,7 +132,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         if not os.path.exists(path):
             os.makedirs(path)
 
-        # 设置日志文件路径
+                  
         if self.file_handler is None:
             log_path = os.path.join(path, 'training.log')
             self.file_handler = logging.FileHandler(log_path)
@@ -140,7 +140,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
             self.file_handler.setFormatter(formatter)
             self.logger.addHandler(self.file_handler)
 
-        # 记录实验参数到日志,使用格式化输出
+                           
         self.logger.info("\nArgs in experiment:")
         self.logger.info("Basic Config")
         self.logger.info(f"  Task Name:          {self.args.task_name:<18} Is Training:        {self.args.is_training:<18}")
@@ -175,7 +175,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
 
         self.logger.info("\nDe-stationary Projector Params")
         self.logger.info(f"  P Hidden Dims:      {', '.join(map(str, self.args.p_hidden_dims)):<18} P Hidden Layers:    {self.args.p_hidden_layers}")
-        self.logger.info("\n" + "-" * 80 + "\n")  # 添加分隔线
+        self.logger.info("\n" + "-" * 80 + "\n")         
 
         time_now = time.time()
 
@@ -206,7 +206,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
+                               
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
                 dec_inp = (
                     torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
@@ -214,7 +214,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                     .to(self.device)
                 )
 
-                # encoder - decoder
+                                   
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
@@ -250,10 +250,10 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                         if (i + 1) % 100 == 0:
                             print(f"\tloss_rec: {loss_rec.item()}")
 
-                        # self.writer.add_scalar(f'{self.pred_len}/train/loss_rec', loss_rec, self.step)
+                                                                                                        
 
                     if self.args.auxi_lambda:
-                        # fft shape: [B, P, D]
+                                              
                         if self.args.auxi_mode == "fft":
                             loss_auxi = torch.fft.fft(outputs, dim=1) - torch.fft.fft(batch_y, dim=1)
 
@@ -301,10 +301,10 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                             loss_auxi *= self.mask
 
                         if self.args.auxi_loss == "MAE":
-                            # MAE, 最小化element-wise error的模长
-                            loss_auxi = loss_auxi.abs().mean() if self.args.module_first else loss_auxi.mean().abs()  # check the dim of fft
+                                                           
+                            loss_auxi = loss_auxi.abs().mean() if self.args.module_first else loss_auxi.mean().abs()                        
                         elif self.args.auxi_loss == "MSE":
-                            # MSE, 最小化element-wise error的模长
+                                                           
                             loss_auxi = (loss_auxi.abs()**2).mean() if self.args.module_first else (loss_auxi**2).mean().abs()
                         else:
                             raise NotImplementedError
@@ -313,7 +313,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                         if (i + 1) % 100 == 0:
                             print(f"\tloss_auxi: {loss_auxi.item()}")
 
-                        # self.logger.info(f'{self.pred_len}/train/loss_auxi', loss_auxi, epoch)
+                                                                                                
 
                     train_loss.append(loss.item())
 
@@ -373,7 +373,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
             print("loading model")
             self.model.load_state_dict(torch.load(os.path.join("./checkpoints/" + setting, "checkpoint.pth")))
 
-        # 获取data_path作为结果文件标识
+                             
         data_identifier = os.path.splitext(os.path.basename(self.args.data_path))[0]
         result_folder = os.path.join(self.args.checkpoints, setting, data_identifier)
         if not os.path.exists(result_folder):
@@ -390,7 +390,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
+                               
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
                 dec_inp = (
                     torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
@@ -398,7 +398,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                     .to(self.device)
                 )
 
-                # encoder - decoder
+                                   
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
@@ -407,10 +407,10 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
 
                 if self.args.features == "MS":
                     f_dim = -1
-                # 单变量预测单变量
+                          
                 elif self.args.features == "S":
                     f_dim = 0
-                # 多变量预测单变量
+                          
                 elif self.args.features == "M" and self.args.target_num == 1:
                     f_dim = self.args.f_dim
                 outputs = outputs[:, -self.args.pred_len :, :]
@@ -420,11 +420,11 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 batch_y = batch_y.detach().cpu().numpy()
                 
                 if test_data.scale and self.args.inverse:
-                    if not self.args.manual_inverse:                     # 使用自带的inverse_transform方法
+                    if not self.args.manual_inverse:                                               
                         shape = outputs.shape
                         outputs = test_data.inverse_transform(outputs.reshape(shape[0] * shape[1], -1)).reshape(shape)
                         batch_y = test_data.inverse_transform(batch_y.reshape(shape[0] * shape[1], -1)).reshape(shape)
-                    else:                                                # 使用手动反归一化（针对外生变量方法）
+                    else:                                                                    
                         output_scale = test_data.scaler.scale_[-4:]
                         output_mean = test_data.scaler.mean_[-4:]
                         batch_y_scale = test_data.scaler.scale_
@@ -452,16 +452,16 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
         print("test shape:", preds.shape, trues.shape)
 
-        # 分别提取X和Z方向的数据
-        x_indices = [0, 2]  # flexgate1_X和flexgate2_X的索引
-        z_indices = [1, 3]  # flexgate1_Z和flexgate2_Z的索引
+                      
+        x_indices = [0, 2]                              
+        z_indices = [1, 3]                              
         
         preds_x = preds[:, :, x_indices]
         trues_x = trues[:, :, x_indices]
         preds_z = preds[:, :, z_indices]
         trues_z = trues[:, :, z_indices]
 
-        # dtw calculation - 总体
+                              
         if self.args.use_dtw:
             dtw_list = []
             
@@ -469,11 +469,11 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 if i % 100 == 0:
                     print("calculating dtw iter:", i)
                 
-                # 提取当前样本的所有维度
-                pred_sample = preds[i]  # 形状: [时间步长, 变量数]
-                true_sample = trues[i]  # 形状: [时间步长, 变量数]
+                             
+                pred_sample = preds[i]                   
+                true_sample = trues[i]                   
                 
-                # 计算多维DTW
+                         
                 distance = dtw_ndim.distance(pred_sample, true_sample)
                 dtw_list.append(distance)
             
@@ -481,7 +481,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         else:
             dtw = "not calculated"
 
-        # dtw calculation - X方向
+                               
         if self.args.use_dtw:
             dtw_x_list = []
             
@@ -489,7 +489,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 if i % 100 == 0:
                     print("calculating dtw X iter:", i)
                 
-                pred_sample_x = preds_x[i]  # 形状: [时间步长, X变量数]
+                pred_sample_x = preds_x[i]                    
                 true_sample_x = trues_x[i]
                 
                 distance_x = dtw_ndim.distance(pred_sample_x, true_sample_x)
@@ -499,7 +499,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         else:
             dtw_x = "not calculated"
 
-        # dtw calculation - Z方向
+                               
         if self.args.use_dtw:
             dtw_z_list = []
             
@@ -507,7 +507,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 if i % 100 == 0:
                     print("calculating dtw Z iter:", i)
                 
-                pred_sample_z = preds_z[i]  # 形状: [时间步长, Z变量数]
+                pred_sample_z = preds_z[i]                    
                 true_sample_z = trues_z[i]
                 
                 distance_z = dtw_ndim.distance(pred_sample_z, true_sample_z)
@@ -517,16 +517,16 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         else:
             dtw_z = "not calculated"
 
-        # 计算总体指标（使用新的频谱指标）
+                          
         mae, rmse, rr, spectral_mae = metric_wave_spectral(preds, trues)
         
-        # 计算X方向指标
+                 
         mae_x, rmse_x, rr_x, spectral_mae_x = metric_wave_spectral(preds_x, trues_x)
         
-        # 计算Z方向指标
+                 
         mae_z, rmse_z, rr_z, spectral_mae_z = metric_wave_spectral(preds_z, trues_z)
 
-        # 保存结果到文件
+                 
         result_file = os.path.join(result_folder, "result.txt")
         f = open(result_file, "a")
         f.write(setting + "  \n")
@@ -542,7 +542,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         f.write("\n")
         f.close()
 
-        # 保存numpy数组
+                   
         np.save(os.path.join(result_folder, "metrics.npy"), np.array([mae, rmse, rr, spectral_mae]))
         np.save(os.path.join(result_folder, "metrics_x.npy"), np.array([mae_x, rmse_x, rr_x, spectral_mae_x]))
         np.save(os.path.join(result_folder, "metrics_z.npy"), np.array([mae_z, rmse_z, rr_z, spectral_mae_z]))
@@ -553,7 +553,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
         np.save(os.path.join(result_folder, "pred_z.npy"), preds_z)
         np.save(os.path.join(result_folder, "true_z.npy"), trues_z)
 
-        # 日志输出
+              
         self.logger.info(f"Start testing for setting: {setting}")
         self.logger.info("test shape: {}, {}".format(preds.shape, trues.shape))
         
@@ -575,7 +575,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 raise FileNotFoundError(f"Checkpoint not found at {model_path}")
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
 
-        # 获取data_path作为结果文件标识
+                             
         data_identifier = os.path.splitext(os.path.basename(self.args.data_path))[0]
         result_folder = os.path.join(self.args.checkpoints, setting, data_identifier)
         if not os.path.exists(result_folder):
@@ -596,7 +596,7 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
+                               
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
                 dec_inp = (
                     torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
@@ -604,24 +604,24 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                     .to(self.device)
                 )
 
-                # encoder - decoder
+                                   
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
                         _ = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
                     _ = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 
-                # Get attention weights
+                                       
                 model_to_use = self.model.module if isinstance(self.model, nn.DataParallel) else self.model
                 try:
-                    # 获取自注意力权重
+                              
                     self_attn_weights = model_to_use.decoder.layers[1].attn
                     
-                    # 获取交叉注意力权重
+                               
                     cross_attn_fwd_weights = model_to_use.decoder.layers[1].cross_attn_fwd
                     cross_attn_rev_weights = model_to_use.decoder.layers[1].cross_attn_rev
                     
-                    # 保存所有三种注意力权重到字典
+                                    
                     all_attn_weights.append({
                         'self_attn': self_attn_weights.detach().cpu().numpy(),
                         'cross_attn_fwd': cross_attn_fwd_weights.detach().cpu().numpy(), 
@@ -633,27 +633,27 @@ class Exp_Forecasting_Frequency_Loss(Exp_Basic):
                     self.logger.error("Please ensure you have modified the model to save cross-attention weights.")
                     return
 
-        # Concatenate and save
+                              
         if not all_attn_weights:
             self.logger.warning("No attention weights were collected. Nothing to save.")
             return
 
-        # 分别提取和保存不同类型的注意力权重
+                           
         self_attn_all = [item['self_attn'] for item in all_attn_weights]
         cross_fwd_attn_all = [item['cross_attn_fwd'] for item in all_attn_weights]
         cross_rev_attn_all = [item['cross_attn_rev'] for item in all_attn_weights]
         
-        # 拼接各类型的注意力权重
+                     
         self_attn_weights_concat = np.concatenate(self_attn_all, axis=0)
         cross_fwd_attn_weights_concat = np.concatenate(cross_fwd_attn_all, axis=0)
         cross_rev_attn_weights_concat = np.concatenate(cross_rev_attn_all, axis=0)
         
-        # 保存文件
+              
         np.save(os.path.join(result_folder, "self_attn_weights.npy"), self_attn_weights_concat)
         np.save(os.path.join(result_folder, "cross_attn_fwd_weights.npy"), cross_fwd_attn_weights_concat)
         np.save(os.path.join(result_folder, "cross_attn_rev_weights.npy"), cross_rev_attn_weights_concat)
         
-        # 为了兼容原有的可视化代码，也保存自注意力权重为默认的 attn_weights.npy
+                                                     
         np.save(os.path.join(result_folder, "attn_weights.npy"), self_attn_weights_concat)
 
         self.logger.info(f"Prediction complete. All attention weights saved.")

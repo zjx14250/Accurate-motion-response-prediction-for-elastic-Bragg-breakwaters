@@ -25,12 +25,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TimesNet")
 
     # Personal Configuration
-    parser.add_argument("--fanhua", action="store_true", help="inverse output data", default=False)  # 泛化测试 
-    parser.add_argument('--pretrained_model', type=str, default=None, help='Path to pretrained model') # 微调测试
-    parser.add_argument("--manual_inverse", action="store_true", help="use manual inverse transform", default=False)  # 手动反归一化   
-    parser.add_argument("--target_num", type=int, default=1, help="0：M-->M, 1：M-->N")  # 目标变量个数
-    parser.add_argument("--f_dim", type=int, default=-4, help="feature dimension index for M->N prediction")  # 在 target_num=1 时，f_dim 为要预测的特征数
-    parser.add_argument("--target", type=str, default="pitch", help="target feature in S or MS task") #  目标变量名称/N个目标变量名称的最后一个
+    parser.add_argument("--fanhua", action="store_true", help="inverse output data", default=False)
+    parser.add_argument('--pretrained_model', type=str, default=None, help='Path to pretrained model')
+    parser.add_argument("--manual_inverse", action="store_true", help="use manual inverse transform", default=False)
+    parser.add_argument("--target_num", type=int, default=1, help="0：M-->M, 1：M-->N")
+    parser.add_argument("--f_dim", type=int, default=-4, help="feature dimension index for M->N prediction") 
+    parser.add_argument("--target", type=str, default="pitch", help="target feature in S or MS task") 
 
     # basic config
     parser.add_argument("--task_name", type=str, required=True, default="long_term_forecast", help="task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection]")
@@ -119,8 +119,8 @@ if __name__ == "__main__":
         help='Numbers of data grid cols for WITRAN')
     
     # FreDF
-    parser.add_argument('--rec_lambda', type=float, default=0.5, help='weight of reconstruction function')         # 时域权重
-    parser.add_argument('--auxi_lambda', type=float, default=0.5, help='weight of auxilary function')               # 频域权重
+    parser.add_argument('--rec_lambda', type=float, default=0.5, help='weight of reconstruction function')         
+    parser.add_argument('--auxi_lambda', type=float, default=0.5, help='weight of auxilary function')               
     parser.add_argument('--auxi_loss', type=str, default='MAE', help='loss function')
     parser.add_argument('--auxi_mode', type=str, default='fft', help='auxi loss mode, options: [fft, rfft, welch]')
     parser.add_argument('--auxi_type', type=str, default='complex', help='auxi loss type, options: [complex, mag, phase, mag-phase]')
